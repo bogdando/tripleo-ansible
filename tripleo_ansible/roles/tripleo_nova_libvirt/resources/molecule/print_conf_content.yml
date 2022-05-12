@@ -1,0 +1,17 @@
+---
+- name: Debug - getting content of configs
+  command: grep -E '^[^#]' {{ item.name }}
+  register: conf_content
+  loop: "{{ conf }}"
+
+- name: Set facts for configs, expected lines and contents
+  set_fact:
+    content: "{{ conf_content.results | map(attribute='stdout_lines') | list }}"
+    expected: "{{ conf_content.results | map(attribute='item') | map(attribute='expected_lines') | list }}"
+    configs: "{{ conf_content.results | map(attribute='item') | map(attribute='name') | list }}"
+
+- name: Debug - printing expected lines and actual configs contents
+  vars:
+    context: "{{ expected | zip(content) }}"
+  debug:
+    var: dict(configs|zip(context))
