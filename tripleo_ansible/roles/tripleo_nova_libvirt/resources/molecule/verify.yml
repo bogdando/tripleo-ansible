@@ -24,39 +24,65 @@
     - name: Import test_vars
       include_vars: "{{ lookup('env', 'MOLECULE_SCENARIO_DIRECTORY') }}/test_vars.yml"
   tasks:
+    - name: Create temporary directory
+      ansible.builtin.tempfile:
+        state: directory
+      register: _verify_configs_copy_result
+
+    - name: Set fact for containers configs copy path
+      set_fact:
+        _verify_configs_copy: "{{ _verify_configs_copy_result.path }}"
+
     - name: Validate configuration
-      when:
-        - config is defined and config
+      when: config is defined and config
       block:
+        - name: Make a copy of a config file
+          shell: |
+            mount_dir={% if _conf.container is defined %}$(podman mount {{ _conf.container }})/{% endif %}
+
+            cp -a ${mount_dir}{{ _conf.name }} {{ _verify_configs_copy }}/{{ _conf.name | regex_replace('\/', '_') }}
+            {% if _conf.container is defined %}podman unmount {{ _conf.container }}{% endif %}
+          with_items:
+            - "{{ config }}"
+          loop_control:
+            loop_var: _conf
+
         - name: Check if changes applied to config files
           lineinfile:
-            path: "{{ conf.0.name }}"
-            line: "{{ conf.1 }}"
+            path: "{{ _verify_configs_copy }}/{{ _conf.0.name | regex_replace('\/', '_') }}"
+            line: "{{ _conf.1 }}"
             state: present
           check_mode: true
-          register: _conf
-          failed_when: _conf is changed or _conf is failed
+          register: _conf_result
+          failed_when: _conf_result is changed or _conf_result is failed
           with_subelements:
             - "{{ config }}"
             - expected_lines
           loop_control:
-            loop_var: conf
+            loop_var: _conf
       rescue:
         - name: Output config
           include_tasks: print_conf_content.yml
           loop:
             - "{{ config }}"
           loop_control:
-            loop_var: conf
+            loop_var: _configs
+
         - name: Print failed lines
           fail:
             msg: |
 
-              "FAILED: Not found in {{entry.path}}: {{entry.line}}"
+              "FAILED: Not found in {{_entry.path}}: {{_entry.line}}"
           failed_when: true
-          loop: "{{ _conf.results | selectattr('failed', 'equalto', true) | map(attribute='invocation') | map(attribute='module_args') }}"
+          loop: "{{ _conf_result.results | selectattr('failed', 'equalto', true) | map(attribute='invocation') | map(attribute='module_args') }}"
           loop_control:
-            loop_var: entry
+            loop_var: _entry
+
         - name: Debug - Scenario name
           debug:
             var: molecule_yml.scenario.name
+
+    - name: Delete containers configs copy directory
+      file:
+        path: "{{ _verify_configs_copy }}"
+        state: absent

@@ -1,5 +1,7 @@
 ---
 # A test case to install, configure all, then run a virtqemud container
+# and check its tripleo configs
+tripleo_nova_libvirt_config_keep_container: true
 config:
   - name: /var/lib/tripleo-config/container-startup-config/nova_libvirt/nova_virtqemud.json
     expected_lines:

@@ -1,8 +1,10 @@
 ---
 # A test case to install, configure containers (do not run it),
 # then to check a virtqemud container config
+tripleo_nova_libvirt_config_keep_container: true
 config:
   - name: /etc/libvirt/virtqemud.conf
+    container: nova_libvirt_config
     expected_lines:
       - unix_sock_group = 'libvirt'
       - unix_sock_ro_perms = '0444'
