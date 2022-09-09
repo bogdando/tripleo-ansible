@@ -152,7 +152,6 @@ tripleo_nova_libvirt_idm_realm: "{{
     ) }}"
 
 tripleo_nova_libvirt_config_use_ansible: true
-tripleo_nova_libvirt_config_keep_container: false
 tripleo_nova_libvirt_config_dir: /var/lib/config-data/ansible-generated/nova_libvirt
 
 # TODO: align with facts set for https://review.opendev.org/839762

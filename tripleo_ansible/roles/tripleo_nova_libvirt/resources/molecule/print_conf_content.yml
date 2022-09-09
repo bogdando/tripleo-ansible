@@ -1,6 +1,6 @@
 ---
 - name: Debug - getting content of configs
-  command: grep -E '^[^#]' {{ _verify_configs_copy }}/{{ item.name | regex_replace('\/', '_') }}
+  command: grep -E '^[^#]' {{ item.name }}
   register: _conf_content
   loop: "{{ _configs }}"
 

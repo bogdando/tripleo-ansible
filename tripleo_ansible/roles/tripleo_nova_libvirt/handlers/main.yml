@@ -15,7 +15,7 @@
 # under the License.
 
 
-- name: Remove or stop nova_libvirt_config container
-  shell: podman {% if tripleo_nova_libvirt_config_keep_container|bool %}stop{% else %}rm{% endif %} -f nova_libvirt_config
+- name: Remove nova_libvirt_config container
+  shell: podman rm -f nova_libvirt_config
   changed_when: false
   failed_when: false

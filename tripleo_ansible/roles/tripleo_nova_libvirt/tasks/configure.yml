@@ -128,15 +128,14 @@
         state: directory
         recurse: true
 
-    - name: Remove nova_libvirt_config container
+    - name: Remove nova_libvirt_config container if exists
       shell: podman rm -f nova_libvirt_config
       changed_when: false
       failed_when: false
 
     - name: Run nova_libvirt_config container
-      shell: |
-        podman run --detach --name nova_libvirt_config {{ tripleo_nova_libvirt_container_config_image }} sleep infinity
-      notify: Remove or stop nova_libvirt_config container
+      shell: podman run --detach --name nova_libvirt_config {{ tripleo_nova_libvirt_container_config_image }} sleep infinity
+      notify: Remove nova_libvirt_config container
       register: config_container_id
 
     - name: Copy initial config files from nova_libvirt_config container

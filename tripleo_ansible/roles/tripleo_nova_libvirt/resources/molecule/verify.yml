@@ -24,32 +24,12 @@
     - name: Import test_vars
       include_vars: "{{ lookup('env', 'MOLECULE_SCENARIO_DIRECTORY') }}/test_vars.yml"
   tasks:
-    - name: Create temporary directory
-      ansible.builtin.tempfile:
-        state: directory
-      register: _verify_configs_copy_result
-
-    - name: Set fact for containers configs copy path
-      set_fact:
-        _verify_configs_copy: "{{ _verify_configs_copy_result.path }}"
-
     - name: Validate configuration
       when: config is defined and config
       block:
-        - name: Make a copy of a config file
-          shell: |
-            mount_dir={% if _conf.container is defined %}$(podman mount {{ _conf.container }})/{% endif %}
-
-            cp -a ${mount_dir}{{ _conf.name }} {{ _verify_configs_copy }}/{{ _conf.name | regex_replace('\/', '_') }}
-            {% if _conf.container is defined %}podman unmount {{ _conf.container }}{% endif %}
-          with_items:
-            - "{{ config }}"
-          loop_control:
-            loop_var: _conf
-
         - name: Check if changes applied to config files
           lineinfile:
-            path: "{{ _verify_configs_copy }}/{{ _conf.0.name | regex_replace('\/', '_') }}"
+            path: "{{ _conf.0.name }}"
             line: "{{ _conf.1 }}"
             state: present
           check_mode: true
@@ -81,8 +61,3 @@
         - name: Debug - Scenario name
           debug:
             var: molecule_yml.scenario.name
-
-    - name: Delete containers configs copy directory
-      file:
-        path: "{{ _verify_configs_copy }}"
-        state: absent
