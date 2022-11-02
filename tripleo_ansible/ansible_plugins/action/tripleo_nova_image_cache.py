@@ -72,7 +72,7 @@ class ActionModule(ActionBase):
                 '_raw_params':
                     (
                         "{} exec -u nova nova_compute /bin/bash -c "
-                        "\"mkdir -p '{}'; chmod 755 '{}'\""
+                        "\"mkdir -p '{}'; chmod 750 '{}'\""
                     ).format(container_cli, cache_dir, cache_dir),
                 'creates': cache_dir
 
@@ -114,7 +114,7 @@ class ActionModule(ActionBase):
                     '_raw_params':
                         (
                             "{} exec -u nova nova_compute /bin/bash -c "
-                            "\"mkdir -p '{}'; chmod 755 '{}'\""
+                            "\"mkdir -p '{}'; chmod 750 '{}'\""
                         ).format(container_cli, cache_tmp, cache_tmp),
                 }
                 command_task_vars = {

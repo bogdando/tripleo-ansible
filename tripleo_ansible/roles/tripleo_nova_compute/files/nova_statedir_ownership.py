@@ -22,6 +22,11 @@ import sys
 
 debug = os.getenv('__OS_DEBUG', 'false')
 
+ALLOWED_UMASK = ['0o0', '0o2', '0o7', '0o22', '0o26', '0o27', '0o77', '0o277']
+DEFAULT_UMASK = '0o027'
+DEFAULT_DIR_MODE = '0o750'
+DEFAULT_FILE_MODE = '0o640'
+
 if debug.lower() == 'true':
     loglevel = logging.DEBUG
 else:
@@ -37,6 +42,7 @@ class PathManager(object):
         self.path = path
         self.uid = None
         self.gid = None
+        self.mode = None
         self.is_dir = None
         self.secontext = None
         self._update()
@@ -47,15 +53,17 @@ class PathManager(object):
             self.is_dir = stat.S_ISDIR(statinfo.st_mode)
             self.uid = statinfo.st_uid
             self.gid = statinfo.st_gid
+            self.mode = oct(statinfo.st_mode & 0o777)
             self.secontext = selinux.lgetfilecon(self.path)[1]
         except Exception:
             LOG.exception('Could not update metadata for %s', self.path)
             raise
 
     def __str__(self):
-        return "uid: {} gid: {} path: {}{}".format(
+        return "uid: {} gid: {} mode: {} path: {}{}".format(
             self.uid,
             self.gid,
+            self.mode,
             self.path,
             '/' if self.is_dir else ''
         )
@@ -63,26 +71,31 @@ class PathManager(object):
     def has_owner(self, uid, gid):
         return self.uid == uid and self.gid == gid
 
+    def has_mode(self, mode):
+        return self.mode == oct(int(mode, 8) & 0o777)
+
     def has_either(self, uid, gid):
         return self.uid == uid or self.gid == gid
 
     def chown(self, uid, gid):
         target_uid = -1
         target_gid = -1
-        if self.uid != uid:
+        src_uid = self.uid
+        src_gid = self.gid
+        if src_uid != uid:
             target_uid = uid
-        if self.gid != gid:
+        if src_gid != gid:
             target_gid = gid
         if (target_uid, target_gid) != (-1, -1):
-            LOG.info('Changing ownership of %s from %d:%d to %d:%d',
-                     self.path,
-                     self.uid,
-                     self.gid,
-                     self.uid if target_uid == -1 else target_uid,
-                     self.gid if target_gid == -1 else target_gid)
             try:
                 os.chown(self.path, target_uid, target_gid)
                 self._update()
+                LOG.info('Changed ownership of %s from %d:%d to %d:%d',
+                         self.path,
+                         src_uid,
+                         src_gid,
+                         self.uid,
+                         self.gid)
             except Exception:
                 LOG.exception('Could not change ownership of %s: ',
                               self.path)
@@ -94,12 +107,12 @@ class PathManager(object):
                      gid)
 
     def chcon(self, context):
-        # If dir returns whether to recusively set context
+        # If dir returns whether to recursively set context
         try:
             try:
                 selinux.lsetfilecon(self.path, context)
                 LOG.info('Setting selinux context of %s to %s',
-                         self.path, context)
+                     self.path, context)
                 return True
             except OSError as e:
                 if self.is_dir and e.errno == 95:
@@ -113,6 +126,32 @@ class PathManager(object):
             LOG.exception('Could not set selinux context of %s to %s:',
                           self.path, context)
             raise
+
+    def chmod(self, mode):
+        target_mode = None
+        src_mode = self.mode
+        if src_mode != mode:
+            target_mode = mode
+        if target_mode != None:
+            try:
+                if type(target_mode) == str:
+                    mode_octal = target_mode
+                else:
+                    mode_octal = oct(target_mode)
+                os.chmod(self.path, int(mode_octal, 8) & 0o777)
+                self._update()
+                LOG.info('Changed permissions of %s from %s to %s',
+                         self.path,
+                         src_mode,
+                         self.mode)
+            except Exception:
+                LOG.exception('Could not change permissions of %s: ',
+                              self.path)
+                raise
+        else:
+            LOG.info('Permissions of %s already %s',
+                     self.path,
+                     mode)
 
 
 class NovaStatedirOwnershipManager(object):
@@ -134,11 +173,15 @@ class NovaStatedirOwnershipManager(object):
        For subsequent runs, or for a new deployment, we simply ensure that the
        docker nova user/group owns all directories. This is required as the
        directories are created with root ownership in host_prep_tasks (the
-       docker nova uid/gid is not known in this context).
+       docker nova uid/gid is not known in this context). We also change
+       permissions of directories and files with a given umask value applied
+       (defaults to 027, i.e. results into 0750/0640). As the root/qemu owned
+       files retain its owner unchanged, but only permissions, there should be
+       no issues with open filehandlers
     """
     def __init__(self, statedir, upgrade_marker='upgrade_marker',
                  nova_user='nova', secontext_marker='../_nova_secontext',
-                 exclude_paths=None):
+                 exclude_paths=None, umask=None):
         self.statedir = statedir
         self.nova_user = nova_user
 
@@ -157,6 +200,26 @@ class NovaStatedirOwnershipManager(object):
         self.previous_uid, self.previous_gid = self._get_previous_nova_ids()
         self.id_change = (self.target_uid, self.target_gid) != \
             (self.previous_uid, self.previous_gid)
+
+        self.umask = DEFAULT_UMASK
+        if umask:
+            try:
+                self.umask = oct(int(umask, 8))
+                if self.umask not in ALLOWED_UMASK:
+                    raise
+            except Exception:
+                LOG.warn("Unexpected umask %s is not in "
+                         "allowed umask %s: using default %s",
+                         umask, ALLOWED_UMASK, DEFAULT_UMASK)
+                self.umask = DEFAULT_UMASK
+
+        self.target_dir_mode = self._get_umasked_mode('0o777')
+        self.target_file_mode = self._get_umasked_mode('0o666')
+        if self.target_dir_mode == '0o000':
+            self.target_dir_mode = DEFAULT_DIR_MODE
+        if self.target_file_mode == '0o000':
+            self.target_file_mode = DEFAULT_FILE_MODE
+
         self.target_secontext = self._get_secontext()
 
     def _get_nova_ids(self):
@@ -176,6 +239,15 @@ class NovaStatedirOwnershipManager(object):
         else:
             return None
 
+    def _get_umasked_mode(self, pattern):
+        try:
+            result = oct(int(pattern, 8) - int(self.umask, 8))
+        except Exception:
+            LOG.warn("Failed to apply umask %s for permissions %s",
+                     self.umask, pattern)
+            result = '0o000'
+        return result
+
     def _walk(self, top, chcon=True):
         for f in os.listdir(top):
             pathname = os.path.join(top, f)
@@ -187,15 +259,16 @@ class NovaStatedirOwnershipManager(object):
                 pathinfo = PathManager(pathname)
                 LOG.info("Checking %s", pathinfo)
                 if pathinfo.is_dir:
-                    # Always chown the directories
+                    # Always chown and chmod the directories
                     pathinfo.chown(self.target_uid, self.target_gid)
+                    pathinfo.chmod(self.target_dir_mode)
                     chcon_r = chcon
                     if chcon:
                         chcon_r = pathinfo.chcon(self.target_secontext)
                     self._walk(pathname, chcon_r)
                 elif self.id_change:
-                    # Only chown files if it's an upgrade and the file is owned by
-                    # the host nova uid/gid
+                    # Only chown/chmod files if it's an upgrade and the file is
+                    # owned by the host nova uid/gid
                     pathinfo.chown(
                         self.target_uid if pathinfo.uid == self.previous_uid
                         else pathinfo.uid,
@@ -204,6 +277,8 @@ class NovaStatedirOwnershipManager(object):
                     )
                     if chcon:
                         pathinfo.chcon(self.target_secontext)
+                    # Always chmod files
+                    pathinfo.chmod(self.target_file_mode)
             except Exception:
                 # Likely to have been caused by external systems
                 # interacting with this directory tree,
@@ -213,14 +288,16 @@ class NovaStatedirOwnershipManager(object):
 
     def run(self):
         LOG.info('Applying nova statedir ownership')
-        LOG.info('Target ownership for %s: %d:%d',
+        LOG.info('Target ownership for %s: %d:%d, mode: %s',
                  self.statedir,
                  self.target_uid,
-                 self.target_gid)
+                 self.target_gid,
+                 self.target_dir_mode)
 
         pathinfo = PathManager(self.statedir)
         LOG.info("Checking %s", pathinfo)
         pathinfo.chown(self.target_uid, self.target_gid)
+        pathinfo.chmod(self.target_dir_mode)
         chcon = self.target_secontext is not None
 
         if chcon:

@@ -24,7 +24,7 @@
     - { 'path': /var/lib/nova, 'setype': container_file_t }
     - { 'path': /var/lib/_nova_secontext, 'setype': container_file_t}
     - { 'path': /var/lib/nova/instances, 'setype': container_file_t }
-    - { 'path': /var/lib/libvirt, 'setype': container_file_t }
+    - { 'path': /var/lib/libvirt, 'setype': container_file_t, 'mode': '0750' }
     - { 'path': /var/log/containers/nova, 'setype': container_file_t, 'mode': '0750' }
 
 - name: Mount Nova NFS Share
@@ -33,7 +33,7 @@
     state: mounted
     fstype: nfs4
     src: "{{ tripleo_nova_compute_nfs_share }}"
-    opts: _netdev,bg,{{ tripleo_nova_compute_nfs_options }},nfsvers={{ tripleo_nova_compute_nfs_version }}
+    opts: _netdev,bg,nosuid,{{ tripleo_nova_compute_nfs_options }},nfsvers={{ tripleo_nova_compute_nfs_version }}
   when: tripleo_nova_compute_nfs_enabled|bool
 
 - name: install tripleo_nova_libvirt_guests systemd unit file (podman)
